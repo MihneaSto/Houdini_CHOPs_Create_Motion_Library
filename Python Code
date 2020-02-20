@@ -1,0 +1,157 @@
+#check if node already exists
+if hou.node("/obj/FPS_anim/motionLibrary") == None:
+
+    #list of selected nodes
+    selNodes = hou.selectedNodes()
+    
+    if selNodes != ():
+    
+        #check what nodes are selected
+        raiseError = 0
+        for check in selNodes:
+            if check.type().name() != "geo" and check.type().name() != "null" and check.type().name() != "bone" and check.type().name() != "subnet":
+                raiseError = 1;
+                break
+                
+        if raiseError == 0:
+            
+            #get user input
+            input = hou.ui.readInput("Add extra parameters you want to include with a \",\" as a separator and no space in between - Eg: \"x,y,z\" :", 
+            buttons=("OK", "Cancel"))
+            
+            #if the user presses "OK"
+            if input[0] == 0:
+            
+                #path to the subnet containing the controls
+                subnet_node = selNodes[0].parent()
+                path_subnet = subnet_node.path()
+            
+                # Code for creating chop node
+                motionLibrary_parent = hou.node(path_subnet)
+                motionLibrary_node = motionLibrary_parent.createNode("chopnet", "motionLibrary", run_init_scripts=False, load_contents=True, exact_type_name=True)
+                motionLibrary_node.setColor(hou.Color([1, 1, 1]))
+                
+                #position of nodes in the network
+                position = 0.0;
+                
+                #list comtaining input params as separate elements
+                inputList = input[1].split(",")
+                
+                for selected in selNodes:
+                
+                    #get selected node's name and path
+                    name = selected.name()
+                    path = selected.path()
+                    
+                    #----------------------------------------------------------------TRANSFORMS 
+                    #get translation, rotation and scale parm of the selected node
+                    t = hou.parmTuple(path + "/t")
+                    r = hou.parmTuple(path + "/r")
+                    s = hou.parmTuple(path + "/s")
+                
+                    #get usable paramaters; parameters that are not locked - FUNCTION
+                    def getParm(parm):
+                        parmList = []
+                        for i in range(0,3):
+                            if parm[i].isLocked() == 0:
+                                parmList.append(parm[i].name())
+                        return parmList
+                    
+                    parmList = []
+                
+                    #check for empty lists and append all the usable parametrs to the parmList
+                    if getParm(t) != []:
+                        parmList.append(getParm(t))
+                
+                    if getParm(r) != []:
+                        parmList.append(getParm(r))
+                    
+                    if getParm(s) != []:
+                        parmList.append(getParm(s))
+                
+                    #turn usable parameters in a string so we can use it in the "name" paramters of the channel node
+                    usableParm = ""
+                    
+                    #get number of channels inside the parmList
+                    chNr = 0
+                    listCh = []
+                
+                    for y in range(len(parmList)):
+                        usableParm += " ".join(str(x) for x in parmList[y]) + " "
+                        
+                        chNr += len(parmList[y])
+                        
+                    #----------------------------------------------------------------TRANSFORMS ^
+                    
+                    #add additional input parms in the list
+                    if inputList != "":
+                        for input in inputList:
+                            parmInput = hou.parm(path + "/"+input)
+                            
+                            if parmInput != None and parmInput.isLocked() == 0:
+                                usableParm += (input + " ")
+                                chNr += 1
+                                
+                    #turn channel number into a list strting from 0 so we can use each element   
+                    for nr in range (chNr):
+                        listCh.append(nr)
+                        
+                    ###########################################################################
+                    #create channel node
+                    # Code for creating channel node
+                    init_parent = hou.node(path_subnet + "/motionLibrary")
+                    init_node = init_parent.createNode("channel", "init_"+name, run_init_scripts=False, load_contents=True, exact_type_name=True)
+                    init_node.setColor(hou.Color([0.3, 0.7, 0.3]))
+                    init_node.move(hou.Vector2(position*5, 0))
+                    #set range
+                    hou_parm = init_node.parm("range")
+                    hou_parm.set("user")
+                    #set end range
+                    hou_parm = init_node.parm("end")
+                    hou_parm.set(0)
+                    #set units
+                    hou_parm = init_node.parm("units")
+                    hou_parm.set("frames")
+                    #set name
+                    hou_parm = init_node.parm("name0")
+                    hou_parm.set(usableParm)
+                    ###########################################################################
+                    #create OUT node
+                    out_parent = hou.node(path_subnet+"/motionLibrary")
+                    out_node = out_parent.createNode("null", "OUT_"+name, run_init_scripts=False, load_contents=True, exact_type_name=True)
+                    out_node.move(hou.Vector2(position*5, -10))
+                    out_node.setInput(0, out_parent.node("init_"+name), 0)
+                    
+                    #increment position so that each pair of nodes will get created at a different position from the previous
+                    position += 1
+                    ###########################################################################
+                    
+                    #add expressions to the selected node
+                    def setExpression(parm):
+                        for i in range(0,3):
+                            if parm[i].isLocked() == 0:
+                                expressionString = "chopcf(\"" + path_subnet + "/motionLibrary/" + "OUT_" + name + "\","  + str(listCh[0]) + ", $F)"
+                                parm[i].setExpression(expressionString, hou.exprLanguage.Hscript)
+                                del listCh[0]
+                                
+                    setExpression(t)
+                    setExpression(r)
+                    setExpression(s)
+                    
+                    #set expression for input parms
+                    if inputList != "":
+                        for input in inputList:
+                            parmInput = hou.parm(path + "/"+input)
+                            
+                            if parmInput != None and parmInput.isLocked() == 0:
+                                expressionString = "chopcf(\"" + path_subnet + "/motionLibrary/" + "OUT_" + name + "\","  + str(listCh[0]) + ", $F)"
+                                parmInput.setExpression(expressionString, hou.exprLanguage.Hscript)
+                                del listCh[0]
+                
+                
+        else:
+            hou.ui.displayMessage("selected nodes must be of type \"geo\", \"null\", \"bone\" or \"subnet\"")
+    else:
+        hou.ui.displayMessage("no nodes selected")
+else:
+    hou.ui.displayMessage("motionLibrary node already created")
